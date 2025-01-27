@@ -6,7 +6,7 @@ import os
 Antonio Leon
 01/21/2025
 MBT for MacOS
-v. 2.0
+v. 3.00
 '''
 
 class TimerApp(rumps.App):
@@ -15,27 +15,27 @@ class TimerApp(rumps.App):
         self.history_file = os.path.join(script_directory, "timer_history.txt")
         icon_path = os.path.join(script_directory, "sandClock2.png")
         super(TimerApp, self).__init__("Timer", icon=icon_path)
+        
+        # Ensure the history file exists
+        if not os.path.exists(self.history_file):
+            with open(self.history_file, "w"): pass
+        
         self.timer = rumps.Timer(self.update_timer, 1)
         self.start_time = None
         self.remaining_time = None
         self.is_running = False
+        self.original_duration = None
+        self.custom_message = "Time is up!"  # Default message
 
         # Set up menu
         self.menu = [
             rumps.MenuItem("Set Custom Time", callback=self.set_custom_time),
-            None,
-            rumps.MenuItem("Quick Timers"),
             None,
             rumps.MenuItem("⏸ Pause", callback=self.pause_timer),
             rumps.MenuItem("▶ Resume", callback=self.resume_timer),
             rumps.MenuItem("⏹ Stop", callback=self.stop_timer),
             None
         ]
-
-        # Add submenu for Quick Timers
-        self.menu["Quick Timers"].add(rumps.MenuItem("5 Minutes", callback=lambda _: self.start_timer(5 * 60)))
-        self.menu["Quick Timers"].add(rumps.MenuItem("10 Minutes", callback=lambda _: self.start_timer(10 * 60)))
-        self.menu["Quick Timers"].add(rumps.MenuItem("30 Minutes", callback=lambda _: self.start_timer(30 * 60)))
 
         self.update_menu_state()
 
@@ -49,32 +49,72 @@ class TimerApp(rumps.App):
 
         if remaining_time == 0:
             self.timer.stop()
+            self.title = ""
             self.is_running = False
             self.log_event("Timer Finished")
-            rumps.notification(title="Timer Expired", subtitle="Time is up!", message="")
+            original_minutes = self.original_duration // 60  # Calculate original duration in minutes
+            rumps.notification(
+                title="Time is up!",
+                subtitle=f"Your timer for {original_minutes} minutes has ended.",
+                message=self.custom_message
+            )
             self.update_menu_state()
 
     @rumps.clicked("Set Custom Time")
     def set_custom_time(self, _):
-        response = rumps.Window(
+        # First window to get the timer duration with a toggle for custom message
+        time_response = rumps.Window(
             title="Set a Custom Timer",
             message="Enter time in minutes:",
             default_text="10",
-            ok="Start Timer",
+            ok="Next",
             cancel="Cancel",
-            dimensions=(220, 50)
-        ).run()
+            dimensions=(220, 40)
+        )
+
+        # Adding a text field to input 'Yes' or 'No'
+        time_response.icon = None
+        response = time_response.run()
 
         if response.clicked:
             try:
                 minutes = int(response.text.strip())
-                if minutes > 0:
-                    self.start_timer(minutes * 60)
-                else:
+                if minutes <= 0:
                     rumps.alert(
                         title="❌ Invalid Input ❌",
                         message="Please enter a positive number greater than 0."
                     )
+                    return
+
+                # Ask for a custom message if 'Yes' was entered
+                custom_message = "Time is up!"  # Default message
+                custom_message_input = rumps.Window(
+                    title="Custom Message",
+                    message="Enter 'Yes' to add a custom message, or 'No' to skip.",
+                    default_text="No",
+                    ok="Next",
+                    cancel="Cancel",
+                    dimensions=(220, 40)
+                ).run()
+
+                if custom_message_input.clicked:
+                    if custom_message_input.text.strip().lower() == "yes":
+                        message_response = rumps.Window(
+                            title="Set Custom Notification Message",
+                            message="Enter a custom message for the notification:",
+                            default_text="Time is up!",
+                            ok="Start Timer",
+                            cancel="Cancel",
+                            dimensions=(220, 40)
+                        ).run()
+
+                        if message_response.clicked:
+                            custom_message = message_response.text.strip()
+                            if not custom_message:
+                                custom_message = "Time is up!"  # Default message if none provided
+
+                self.start_timer(minutes * 60, custom_message)
+
             except ValueError:
                 rumps.alert(
                     title="❌ Invalid Input ❌",
@@ -108,9 +148,11 @@ class TimerApp(rumps.App):
             self.title = ""
             self.update_menu_state()
 
-    def start_timer(self, duration):
+    def start_timer(self, duration, custom_message):
+        self.original_duration = duration  # Store the original duration
         self.remaining_time = duration
         self.start_time = time.time()
+        self.custom_message = custom_message  # Store the custom message
         self.timer.start()
         self.is_running = True
         self.log_event(f"Timer Started ({duration // 60} minutes)")
